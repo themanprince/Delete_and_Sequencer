@@ -1,0 +1,122 @@
+# usage:	search dirToStart varToUpdate ...dirsToSearchFor
+usage='USAGE: search 	 [-dir\tdirToStart] [-v\tvarToUpdate] [-d\tdepthToStop] [-s	\tdirToFind1,dirToFind2 ...dirToFindN]'	#for error logging
+#for conventional purposes, I'm declaring these vars first... to establish that they are global
+declare dirToStart
+declare -n varToUpdate #I'm assuming that way, whatever string is passed to varToUpdate will be name of variable for which to pass by reference
+declare -a dirsToAdd
+declare depthToStop
+
+declare intermediateDirsToAdd #the first comma seperated string the user will supply for -s (dirsToAdd) argument
+if (($# == 0))	#in case user dont enter shit as args
+then
+	 #The rest var below is just to throw away every other input asides the first word... in case the user a BITCH
+	read -p 'Enter the dir to start searching from: ' dirToStart rest
+	read -p "Enter the var to update: " varToUpdate rest
+	read -p "Enter the depth to stop searching at: " depthToStop rest
+	read -p 'Names of dirs to find(dir1,dir2,..dirN - dont add whitespace before or after comma): ' intermediateDirsToAdd
+	unset rest
+elif (($# < 8)) #if user enter incorrect number of args
+then
+ 	echo -e "Invalid number of arguments\n${usage}"
+ 	exit 2
+else #then finally, correct no of arguments
+	while (( $# > 0))
+	do
+		firstArg=$1
+		shift
+		case $firstArg in
+			"-dir")
+				dirToStart=$1
+				shift
+				;;
+			"-v")
+				varToUpdate=$1
+				shift
+				;;
+			"-s")
+				intermediateDirsToAdd=$1
+				shift
+				;;
+			"-d")
+				depthToStop=$1
+				shift
+				;;
+			*)
+				echo -e "Invalid arg '$firstArg' moufucka\n$usage"
+				exit 2
+		esac	
+	done
+fi
+#converting intermediateDirsToAdd string into dirsToAdd array so as to have same interface to work with the old code (some of the below)
+#first resetting $IFS
+IFS=","
+read -ra dirsToAdd <<< "$intermediateDirsToAdd"
+
+#if we got here, then e'rything okay with the args
+#first a function that helps 'unshift' shit to an array
+function unshift() {	#usage of this function is unshift(el, arr)
+	#gon push everything down and put the the specified el in the arr
+	declare -n el="$1"	#take note of the -n flag for declaring references
+	declare -n arr="$2"
+	#pushing shit in the arr down
+	for ((i = ${#arr[@]}; i >= 0; i--)) {
+		arr[$((i + 1))]=${arr[i]};
+	}
+	arr[0]=$el;
+}
+function shift() { #usage of this function is shift(arr)
+	declare -n arr="$1" #reference to array passed as arg
+	declare -g SHIFTRETURN #the return value of this function... which in a funny turn of events is going to be determined now
+	SHIFTRETURN="${arr[0]}"
+	#gon push everything upwards
+	for ((i = 0; i < ${#arr[@]}; i++)) {
+		arr[$i]="${arr[$((i + 1))]}"
+	}
+	local lastIndex=${#arr[@]}-1
+	unset arr[lastIndex] #deleting last element cus its just a repetition of n-2 element
+}
+#next, main shit that gon do the adding to var
+#the aglorithm I'm using is iteration-with-stacks, so it finna prolly get confusing... or not
+#ALSO NOTE THAT THE NUMBERS THAT WILL BE ATTACHED WITH THE STACK ENTRIES ARE NOT THE ONES THE ALGORITHM REQUIRE
+#THEY ARE FOR FOLDER DEPTH CHECKING
+declare -a stack
+stack+=("$dirToStart,1")
+while((${#stack[@]} > 0))
+do
+	shift stack
+	IFS="," #this is because along the lines of this loop when I want to do a splitting based on newlines, IFS is reset to \n and being a global var...
+	declare shiftedVal
+	declare currDepth
+	read shiftedVal currDepth <<< "$SHIFTRETURN" #IFS is still question mark... sorry, comma... I dey vex... if you like, vex too
+	declare -a dirList
+	  #this array gon store all the dirs in $shiftedVar directory folder
+	IFS=$'\n'
+	readarray -t dirList < <(for item in $(ls -1 "$shiftedVal"); do if [ -d "$shiftedVal/$item" ]; then echo "$item"; fi; done)
+	#ls -l "$shiftedVal" | grep 4096 | awk '(NF == 9) { print $9 } (NF > 9) { for (i = 9; i <= NF; i++) { if(i < NF) { printf "%s ", $i} else{ printf "%s", $i} } print "" }'
+	#thats the old set of processes for identifying dirs
+	for i in ${!dirList[@]} #for all dir in current dir
+	do
+		curr="${dirList[$i]}"
+		found=false
+		for dirIndex in ${!dirsToAdd[@]}
+		do
+			currHere="${dirsToAdd[$dirIndex]}" #curr value here
+			if [[ "$curr" =  "$currHere" ]]
+			then
+				found=true
+				break
+			fi
+		done
+		if [[ "$found" = "true" ]] #duhh
+		then
+			pathToCurr=$(cd "$shiftedVal/$curr" ; pwd)
+			varToUpdate="$varToUpdate:$pathToCurr"
+			else #its just a normal dir that needs to be traversed
+			declare nextDepth=$((currDepth + 1))
+			if (( depthToStop == "ALL" || depthToStop != nextDepth )) #abeg I nur fit explain am... look the loop well... sorry, the if statement.. yes, vex.. go fuck yourself
+			then
+				stack+=("$shiftedVal/$curr,$nextDepth")
+			fi
+		fi
+	done
+done
